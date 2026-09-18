@@ -20,27 +20,28 @@ QStringList SerialController::availablePorts() {
   // 1) 主力：Qt 官方的跨平台枚举，只列内核认得的真串口，
   //    还能顺带拿到描述、VID/PID（info.description() 等，界面里可用来显示厂商）。
   for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts()) {
-#ifndef Q_OS_WIN
-    // Linux 的 /sys 设备树里可能登记着没有实际设备节点的端口（如容器里的 ttyS0~ttyS31），
-    // 列出来也打不开。按「设备节点是否真实存在」过滤掉。
+#ifdef Q_OS_LINUX
+    // 下面两条都是 Linux 特有的「幽灵端口」过滤（其它平台不需要，就不编进去）：
+
+    // 1a) /sys 设备树里可能登记着主机上并没有的端口，列出来也打不开 → 按节点是否真实存在过滤
     if (!QFile::exists(info.systemLocation()))
       continue;
-#endif
-    // 内核的 8250 驱动会注册 32 个 legacy 串口（ttyS0~ttyS31），主板上往往根本没有对应硬件，
-    // 它们也没有 USB 属性。这类"占位端口"一律不显示——真要用板载串口时手动输入 ttyS0 即可。
-    // 判据和 Arduino 生态一致：真正的 USB 串口在 sysfs 里属于 usb / usb-serial 子系统，
-    // 在 Qt 这边就体现为有 VID/PID（hasVendorIdentifier）。
+
+    // 1b) 内核 8250 驱动会注册 32 个 legacy 串口（ttyS0~ttyS31），主板上往往根本没有对应硬件，
+    //     它们也没有 USB 属性。判据和 Arduino 生态一致：真正的 USB 串口在 sysfs 里属于
+    //     usb / usb-serial 子系统，在 Qt 这边就体现为有 VID/PID（hasVendorIdentifier）。
+    //     真要用板载串口，手动输入 ttyS0 即可（下拉框本就可编辑）。
     if (info.portName().startsWith(QStringLiteral("ttyS")) &&
         !info.hasVendorIdentifier())
       continue;
-
+#endif
     names << info.portName();
   }
 
 #ifdef Q_OS_LINUX
   // 2) 兜底（仅 Linux）：socat 之类造的虚拟串口只是 /dev 下的软链接，不在 /sys 里，
   //    QSerialPortInfo 看不到，但从目录能扫到 —— 调试与自测都靠它。
-  //    这里刻意不含 ttyS*：那是上一步已经排除掉的 8250 占位端口。
+  //    这里刻意不含 ttyS*：那是 1b) 已经排除掉的 8250 占位端口。
   const QDir devDir(QStringLiteral("/dev"));
   const QStringList filters{"ttyUSB*", "ttyACM*"};
   names << devDir.entryList(filters, QDir::System | QDir::Files | QDir::Readable);
