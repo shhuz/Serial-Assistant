@@ -24,20 +24,29 @@ jobs:
           modules: 'qtserialport'
           cache: true
 
+      # 显式指定 VS 生成器：-A x64 只在 Visual Studio 生成器下有效，
+      # 万一 runner 默认给的是 Ninja，这一步会直接报参数错误。
       - name: 配置
-        run: cmake -B build -S . -A x64
+        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64
 
       - name: 编译
         run: cmake --build build --config Release --parallel
 
-      # 关键一步：CMakeLists 里的 qt_generate_deploy_app_script 会在 install 阶段
-      # 自动调用 windeployqt，把 Qt6Core.dll、platforms/qwindows.dll 等依赖收进 dist/。
-      # 注意 --prefix 必须是绝对路径（相对路径会让 Qt 的部署脚本报 qt.conf 错误）。
+      # 关键一步：用 windeployqt 把 Qt6Core.dll、platforms/qwindows.dll 等依赖收进 dist/。
+      # 不用 qt_generate_deploy_app_script：它依赖 Qt 生成的 QtDeployTargets-<配置>.cmake，
+      # 该文件在部分环境（windows-latest + Qt 6.7）不会生成，会让 cmake --install 直接失败。
+      # windeployqt 由 install-qt-action 加进 PATH，行为完全可预期。
       - name: 收集运行库（windeployqt）
-        run: cmake --install build --config Release --prefix "$env:GITHUB_WORKSPACE\dist"
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item build/Release/Serial-Assistant.exe dist/
+          windeployqt --release --no-translations --compiler-runtime --dir dist dist/Serial-Assistant.exe
+
+      - name: 列出收进来的文件（排查用）
+        run: Get-ChildItem -Recurse dist | Select-Object -First 40 -ExpandProperty FullName
 
       - name: 打 zip
-        run: Compress-Archive -Path dist/* -DestinationPath "Serial-Assistant-$env:GITHUB_REF_NAME-win64.zip"
+        run: Compress-Archive -Path dist/* -DestinationPath "Serial-Assistant-${env:GITHUB_REF_NAME}-win64.zip"
 
       - name: 上传到 Release
         uses: softprops/action-gh-release@v2

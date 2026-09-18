@@ -42,14 +42,11 @@ if(UNIX AND NOT APPLE)
         INSTALL_RPATH "$ORIGIN/../lib")
 endif()
 
-# 生成发布部署脚本：Windows 上会调用 windeployqt 收齐 DLL 和插件，macOS 上是 macdeployqt。
-# 只在 Windows / macOS 启用：Linux 上该脚本尚不完善（会去改 Qt 自带插件的 RPATH 而报错），
-# Linux 的免安装包由 CI 自己收集 Qt 库（见 .github/workflows/release.yml）。
-if(WIN32 OR APPLE)
-    qt_generate_deploy_app_script(
-        TARGET Serial-Assistant
-        OUTPUT_SCRIPT deploy_script
-        NO_UNSUPPORTED_PLATFORM_ERROR
-    )
-    install(SCRIPT ${deploy_script})
-endif()
+# 关于打包：这里**故意不用** qt_generate_deploy_app_script。
+# 它依赖 Qt 生成的 QtDeployTargets-<配置>.cmake，在部分环境（如 GitHub 的 windows-latest
+# + Qt 6.7）下该文件不会生成，导致 cmake --install 直接失败：
+#   include could not find requested file: QtDeployTargets-$<CONFIG>.cmake
+# Linux 上它也不完善（会去改 Qt 自带插件的 RPATH 而报错）。
+# 因此打包交给 CI 显式完成（见 .github/workflows/release.yml）：
+#   Windows → windeployqt     Linux → 自己收 Qt 库 + INSTALL_RPATH
+# macOS 上如需打包，用 macdeployqt 即可。
