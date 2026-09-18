@@ -21,6 +21,7 @@
 #include <windows.h>
 
 #include <string>
+#include <vector> // 拼命令行用（CreateProcessW 要求可写缓冲区）
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   wchar_t exePath[MAX_PATH] = {};
@@ -38,7 +39,16 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   GetEnvironmentVariableW(L"PATH", oldPath, 32767);
   SetEnvironmentVariableW(L"PATH", (runtimeDir + L";" + oldPath).c_str());
 
-  std::wstring cmdLine = L"\"" + appExe + L"\"";
+  // CreateProcessW 的 lpCommandLine 要求「可写」缓冲区，所以这里自己拼一个
+  // vector<wchar_t>（不用 std::wstring::data() 的非 const 重载 —— 那是 C++17 才有的，
+  // 而这个 target 不链接 Qt，拿不到 /std:c++17，MSVC 默认 C++14 会直接编译不过）。
+  std::vector<wchar_t> cmdLine;
+  cmdLine.reserve(appExe.size() + 3);
+  cmdLine.push_back(L'"');
+  cmdLine.insert(cmdLine.end(), appExe.begin(), appExe.end());
+  cmdLine.push_back(L'"');
+  cmdLine.push_back(L'\0');
+
   STARTUPINFOW si = {};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi = {};

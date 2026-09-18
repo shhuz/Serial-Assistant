@@ -58,6 +58,11 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     add_executable(Serial-Assistant-launcher launcher/launcher.cpp)
 endif()
+if(TARGET Serial-Assistant-launcher)
+    # 这个 target 不链接 Qt，不会自动带上 Qt 要求的 C++ 标准（MSVC 默认 C++14），
+    # 所以显式声明一下，免得踩到「C++17 才有的 API 在 MSVC 上编不过」。
+    target_compile_features(Serial-Assistant-launcher PRIVATE cxx_std_17)
+endif()
 
 # 关于打包：这里**故意不用** qt_generate_deploy_app_script。
 # 它依赖 Qt 生成的 QtDeployTargets-<配置>.cmake，在部分环境（如 GitHub 的 windows-latest
