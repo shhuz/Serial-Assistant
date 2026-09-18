@@ -24,10 +24,11 @@ jobs:
           modules: 'qtserialport'
           cache: true
 
-      # 显式指定 VS 生成器：-A x64 只在 Visual Studio 生成器下有效，
-      # 万一 runner 默认给的是 Ninja，这一步会直接报参数错误。
+      # 不要写死 VS 版本号（如 -G "Visual Studio 17 2022"）：runner 上的 Visual Studio
+      # 版本是会升级的，写死会报 "could not find any instance of Visual Studio"。
+      # 只给 -A x64，让 CMake 自动挑选已安装的 VS 生成器。
       - name: 配置
-        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64
+        run: cmake -B build -S . -A x64
 
       - name: 编译
         run: cmake --build build --config Release --parallel
