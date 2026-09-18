@@ -87,6 +87,14 @@ int main(int argc, char **argv) {
 
   // 插件目录指到包内（免得依赖 qt.conf 是否被一起解压出来）
   setenv("QT_PLUGIN_PATH", (runtimeDir + "plugins").c_str(), 1);
+
+  // 库目录也带上：平台插件（libqxcb.so）是运行时 dlopen 进来的，
+  // 它自己的依赖同样要走包内 lib/，光靠本体的 RPATH 不一定覆盖得到。
+  const std::string libDir = runtimeDir + "lib";
+  const char *oldLibPath = getenv("LD_LIBRARY_PATH");
+  const std::string libPath =
+      (oldLibPath && *oldLibPath) ? libDir + ":" + oldLibPath : libDir;
+  setenv("LD_LIBRARY_PATH", libPath.c_str(), 1);
   if (chdir(runtimeDir.c_str()) != 0) {
     std::fprintf(stderr, "启动失败：找不到目录 %s\n", runtimeDir.c_str());
     return 1;

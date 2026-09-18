@@ -104,26 +104,38 @@ jobs:
       # 包结构：根目录只放启动器，其它一切都在 runtime/ 里（与 Windows 完全一致）
       #   Serial-Assistant            ← 启动器（launcher/launcher.cpp）
       #   runtime/Serial-Assistant + lib/ + plugins/ + qt.conf
-      # 本体自带 RPATH=$ORIGIN/lib，所以不用设 LD_LIBRARY_PATH。
       - name: 打包便携版 tar.gz
         run: |
           set -euo pipefail
           PKG="Serial-Assistant-$GITHUB_REF_NAME-linux-x86_64"
           PLUGINS="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS)"
+          PLAT="$PKG/runtime/plugins/platforms"
 
           cmake --install build --prefix "$PWD/$PKG"     # -> $PKG/bin/Serial-Assistant（必须是绝对路径）
-          mkdir -p "$PKG/runtime/lib" "$PKG/runtime/plugins/platforms"
+          mkdir -p "$PKG/runtime/lib" "$PLAT"
           mv "$PKG/bin/Serial-Assistant" "$PKG/runtime/" # 本体进 runtime/
           rmdir "$PKG/bin"
-          cp -L "$PLUGINS/platforms/libqxcb.so" "$PKG/runtime/plugins/platforms/"
 
-          # 只带 Qt / ICU 这些「Qt 自己的」库；libX11、libc 等系统基础库由目标机提供
-          { ldd "$PKG/runtime/Serial-Assistant"; ldd "$PLUGINS/platforms/libqxcb.so"; } \
+          cp -L "$PLUGINS/platforms/libqxcb.so" "$PLAT/"
+          # 有就带上：wayland（原生 Wayland 会话）、offscreen（无显示器的环境）
+          cp -L "$PLUGINS/platforms/"libqwayland*.so "$PLAT/" 2>/dev/null || true
+          cp -L "$PLUGINS/platforms/"libqoffscreen.so "$PLAT/" 2>/dev/null || true
+
+          # 依赖收集策略：**默认全带**，只排除「必须由目标机提供」的那几类：
+          #   · glibc / libstdc++ / libgcc  —— 系统运行时，跟发行版走
+          #   · libGL / libEGL / libdrm / libnvidia / libcuda / libvulkan —— 显卡相关，必须用目标机的
+          #   · libwayland* —— 要和目标机的合成器版本匹配
+          # 之所以不再"只带 Qt 库"：libxcb-cursor.so.0、libxkbcommon-x11.so.0 这些
+          # xcb 辅助库并不是每台机器都有，而 Qt 6.5+ 的 xcb 插件强依赖它们
+          #（少了就会报 "xcb-cursor0 or libxcb-cursor0 is needed"）。
+          DENY='^(ld-linux.*|libc\.so|libc-[0-9]|libm\.so|libdl\.so|libpthread\.so|librt\.so|libgcc_s\.so|libstdc\+\+\.so|libGL|libEGL|libOpenGL|libGLX|libGLdispatch|libdrm|libnvidia|libcuda|libvulkan|libwayland)'
+          { ldd "$PKG/runtime/Serial-Assistant"; ldd "$PLAT"/*.so; } \
             | awk '/=> \// { print $3 }' | sort -u \
             | while read -r lib; do
-                case "$(basename "$lib")" in
-                  libQt6*|libicu*) cp -L "$lib" "$PKG/runtime/lib/" ;;
-                esac
+                base="$(basename "$lib")"
+                if ! printf '%s' "$base" | grep -Eq "$DENY"; then
+                  cp -L "$lib" "$PKG/runtime/lib/"
+                fi
               done
 
           printf '[Paths]\nPrefix = .\nPlugins = plugins\n' > "$PKG/runtime/qt.conf"
@@ -132,6 +144,9 @@ jobs:
           cp build/Serial-Assistant-launcher "$PKG/Serial-Assistant"
           chmod +x "$PKG/Serial-Assistant"
 
+          echo "== 包内 lib/ 收了 $(ls "$PKG/runtime/lib" | wc -l) 个库 =="
+          ls "$PKG/runtime/lib" | tr '\n' ' '
+          echo
           tar czf "$PKG.tar.gz" "$PKG"
 
       - name: 打包 AppImage
