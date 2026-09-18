@@ -1,7 +1,7 @@
 name: build
 
-# 日常 CI：每次 push / PR 都在 Linux 和 Windows 上各编一遍，
-# 保证代码在两个平台上都"编得过"（这是跨平台项目最基本的保障）。
+# 日常 CI：每次 push / PR 都在 Linux 和 Windows 上各编一遍并跑单元测试，
+# 保证代码在两个平台上都"编得过、测得过"（这是跨平台项目最基本的保障）。
 on:
   push:
   pull_request:
@@ -29,12 +29,16 @@ jobs:
           modules: 'qtserialport'
           cache: true
 
+      # socat 是给单元测试造虚拟串口用的（没有它，相关用例会自动跳过）
       - name: 安装 Linux 构建依赖
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev socat
 
       - name: 配置
         run: cmake -B build -S . ${{ matrix.configure }}
 
       - name: 编译
         run: cmake --build build --config Release --parallel
+
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure

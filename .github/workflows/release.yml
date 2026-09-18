@@ -1,8 +1,11 @@
 name: release
 
-# CD：打 tag（如 v1.0.0）时，在两个平台上各出一份「免安装直接运行版」并挂到 Release。
+# CD：打 tag（如 v1.0.0）时，在 Windows / Linux 上各自构建并打包，最后统一发布到 Release。
 #   Windows → zip（exe + 全部 Qt DLL / 插件，解压双击即用）
 #   Linux   → AppImage（单文件）+ 便携 tar.gz（零依赖，解压即用，不需要 root）
+#
+# 结构上分成三步：两个平台各自「构建 + 打包 + 上传 artifact」，
+# 最后一个 publish job 汇总所有产物统一发 Release —— 避免两个 job 同时写 Release 造成竞态。
 on:
   push:
     tags: ['v*']
@@ -12,8 +15,6 @@ jobs:
   # ---------------------------------------------------------------- Windows
   windows:
     runs-on: windows-latest
-    permissions:
-      contents: write # 允许创建 Release
     steps:
       - uses: actions/checkout@v4
 
@@ -25,7 +26,7 @@ jobs:
           cache: true
 
       # 不要写死 VS 版本号（如 -G "Visual Studio 17 2022"）：runner 上的 Visual Studio
-      # 版本是会升级的，写死会报 "could not find any instance of Visual Studio"。
+      # 版本会升级，写死会报 "could not find any instance of Visual Studio"。
       # 只给 -A x64，让 CMake 自动挑选已安装的 VS 生成器。
       - name: 配置
         run: cmake -B build -S . -A x64
@@ -33,32 +34,51 @@ jobs:
       - name: 编译
         run: cmake --build build --config Release --parallel
 
-      # 关键一步：用 windeployqt 把 Qt6Core.dll、platforms/qwindows.dll 等依赖收进 dist/。
-      # 不用 qt_generate_deploy_app_script：它依赖 Qt 生成的 QtDeployTargets-<配置>.cmake，
-      # 该文件在部分环境（windows-latest + Qt 6.7）不会生成，会让 cmake --install 直接失败。
-      # windeployqt 由 install-qt-action 加进 PATH，行为完全可预期。
-      - name: 收集运行库（windeployqt）
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # 包结构：根目录只放启动器，其它一切都在 runtime/ 里（三个平台统一）
+      #   Serial-Assistant.exe   ← 启动器（launcher/launcher.cpp）
+      #   runtime/Serial-Assistant.exe + Qt6*.dll + plugins/ + qt.conf
+      #
+      # 用 windeployqt 收依赖，不用 qt_generate_deploy_app_script：后者依赖 Qt 生成的
+      # QtDeployTargets-<配置>.cmake，该文件在部分环境（windows-latest + Qt 6.7）不会生成，
+      # 会让 cmake --install 直接失败。
+      - name: 打包（windeployqt + 启动器）
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/Release/Serial-Assistant.exe dist/
-          windeployqt --release --no-translations --compiler-runtime --dir dist dist/Serial-Assistant.exe
+          $pkg = "Serial-Assistant-${env:GITHUB_REF_NAME}-win64"
+          New-Item -ItemType Directory -Force "$pkg/runtime" | Out-Null
+          Copy-Item build/Release/Serial-Assistant.exe "$pkg/runtime/"
+          windeployqt --release --no-translations --compiler-runtime --dir "$pkg/runtime" "$pkg/runtime/Serial-Assistant.exe"
 
-      - name: 列出收进来的文件（排查用）
-        run: Get-ChildItem -Recurse dist | Select-Object -First 40 -ExpandProperty FullName
+          # 插件统一收进 runtime/plugins，配 qt.conf 告诉 Qt 去哪儿找（与本体同级）
+          New-Item -ItemType Directory -Force "$pkg/runtime/plugins" | Out-Null
+          Get-ChildItem "$pkg/runtime" -Directory | Where-Object { $_.Name -ne 'plugins' } |
+              ForEach-Object { Move-Item $_.FullName "$pkg/runtime/plugins/" }
+          Set-Content -Path "$pkg/runtime/qt.conf" -Value "[Paths]`nPrefix = .`nPlugins = plugins"
 
+          # 根目录放启动器：它把 runtime 挂到 PATH 上，再启动本体
+          Copy-Item build/Release/Serial-Assistant-launcher.exe "$pkg/Serial-Assistant.exe"
+
+          Get-ChildItem -Recurse $pkg | Select-Object -First 40 -ExpandProperty FullName
+
+      # 压缩时把整个文件夹包进去（而不是 -Path $pkg/*），这样解压出来就是一个干净的 app 目录，
+      # 而不是把 20 多个 DLL 散落到下载目录里
       - name: 打 zip
-        run: Compress-Archive -Path dist/* -DestinationPath "Serial-Assistant-${env:GITHUB_REF_NAME}-win64.zip"
+        run: |
+          $pkg = "Serial-Assistant-${env:GITHUB_REF_NAME}-win64"
+          Compress-Archive -Path $pkg -DestinationPath "$pkg.zip"
 
-      - name: 上传到 Release
-        uses: softprops/action-gh-release@v2
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
         with:
-          files: Serial-Assistant-*-win64.zip
+          name: windows
+          path: Serial-Assistant-*-win64.zip
+          if-no-files-found: error
 
   # ------------------------------------------------------------------ Linux
   linux:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -69,18 +89,22 @@ jobs:
           modules: 'qtserialport'
           cache: true
 
+      # socat 给单元测试造虚拟串口，imagemagick 用来生成 AppImage 需要的图标
       - name: 安装构建/打包依赖
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev imagemagick
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev socat imagemagick
 
       - name: 配置与编译
         run: |
           cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --parallel
 
-      # 便携版：exe + 它真正依赖的 Qt 库 + xcb 平台插件，解压即用、不需要 root。
-      # （qt_generate_deploy_app_script 只支持 Windows/macOS，Linux 上得自己收）
-      # CMakeLists 里设了 INSTALL_RPATH=$ORIGIN/../lib，所以装出来的可执行文件
-      # 会自己从同级的 lib/ 找 Qt 库，不用设 LD_LIBRARY_PATH。
+      - name: 单元测试
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # 包结构：根目录只放启动器，其它一切都在 runtime/ 里（与 Windows 完全一致）
+      #   Serial-Assistant            ← 启动器（launcher/launcher.cpp）
+      #   runtime/Serial-Assistant + lib/ + plugins/ + qt.conf
+      # 本体自带 RPATH=$ORIGIN/lib，所以不用设 LD_LIBRARY_PATH。
       - name: 打包便携版 tar.gz
         run: |
           set -euo pipefail
@@ -88,23 +112,26 @@ jobs:
           PLUGINS="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS)"
 
           cmake --install build --prefix "$PWD/$PKG"     # -> $PKG/bin/Serial-Assistant（必须是绝对路径）
-          mkdir -p "$PKG/lib" "$PKG/plugins/platforms"
-          cp -L "$PLUGINS/platforms/libqxcb.so" "$PKG/plugins/platforms/"
+          mkdir -p "$PKG/runtime/lib" "$PKG/runtime/plugins/platforms"
+          mv "$PKG/bin/Serial-Assistant" "$PKG/runtime/" # 本体进 runtime/
+          rmdir "$PKG/bin"
+          cp -L "$PLUGINS/platforms/libqxcb.so" "$PKG/runtime/plugins/platforms/"
 
           # 只带 Qt / ICU 这些「Qt 自己的」库；libX11、libc 等系统基础库由目标机提供
-          { ldd "$PKG/bin/Serial-Assistant"; ldd "$PLUGINS/platforms/libqxcb.so"; } \
+          { ldd "$PKG/runtime/Serial-Assistant"; ldd "$PLUGINS/platforms/libqxcb.so"; } \
             | awk '/=> \// { print $3 }' | sort -u \
             | while read -r lib; do
                 case "$(basename "$lib")" in
-                  libQt6*|libicu*) cp -L "$lib" "$PKG/lib/" ;;
+                  libQt6*|libicu*) cp -L "$lib" "$PKG/runtime/lib/" ;;
                 esac
               done
 
-          printf '[Paths]\nPrefix = .\nPlugins = plugins\n' > "$PKG/qt.conf"
+          printf '[Paths]\nPrefix = .\nPlugins = plugins\n' > "$PKG/runtime/qt.conf"
 
-          # 兜底启动脚本：万一某发行版不认 RPATH，用这个也能跑
-          printf '#!/bin/sh\nDIR=$(cd "$(dirname "$0")" && pwd)\nexport LD_LIBRARY_PATH="$DIR/lib:$LD_LIBRARY_PATH"\nexec "$DIR/bin/Serial-Assistant" "$@"\n' > "$PKG/run.sh"
-          chmod +x "$PKG/run.sh"
+          # 根目录放启动器
+          cp build/Serial-Assistant-launcher "$PKG/Serial-Assistant"
+          chmod +x "$PKG/Serial-Assistant"
+
           tar czf "$PKG.tar.gz" "$PKG"
 
       - name: 打包 AppImage
@@ -140,9 +167,51 @@ jobs:
               --output appimage
           mv Serial_Assistant*.AppImage "Serial-Assistant-$GITHUB_REF_NAME-x86_64.AppImage"
 
-      - name: 上传到 Release
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            Serial-Assistant-*-x86_64.AppImage
+            Serial-Assistant-*-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  # ------------------------------------------------------------ 汇总发布
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 允许创建 Release
+    steps:
+      - uses: actions/checkout@v4 # 为了读 CMakeLists 里的版本号
+
+      - name: 下载所有产物
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      # 版本号只有一个来源：CMakeLists 的 project(... VERSION ...)。
+      # tag 和它对不上就直接失败，避免发出"名不副实"的包。
+      - name: 校验 tag 与 CMakeLists 版本一致
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^project\(Serial_Assistant VERSION ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' CMakeLists.txt | head -1)
+          echo "CMakeLists 版本 = $version ；tag = $GITHUB_REF_NAME"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag 与 CMakeLists.txt 里的版本不一致：请先把 project(... VERSION ...) 改成 ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
+      - name: 生成校验和
+        run: |
+          sha256sum Serial-Assistant-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: 发布到 Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            Serial-Assistant-*-x86_64.AppImage
-            Serial-Assistant-*-linux-x86_64.tar.gz
+            Serial-Assistant-*
+            SHA256SUMS.txt
+          generate_release_notes: true # 自动生成发布说明（按提交/PR 归纳）

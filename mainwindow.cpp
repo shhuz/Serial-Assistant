@@ -2,9 +2,11 @@
 #include "serialcontroller.h"
 #include "ui_mainwindow.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QEvent>
 #include <QKeySequence>
+#include <QMessageBox>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QTextCursor>
@@ -77,6 +79,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow),
       serial(new SerialController(this)) {
   ui->setupUi(this);
+
+  // 标题栏带上版本号（版本号源头是 CMakeLists 的 project(... VERSION)，见 main.cpp）
+  setWindowTitle(tr("串口助手 %1").arg(QCoreApplication::applicationVersion()));
 
   // 1) 波特率：给出常用预设，并允许自定义输入。
   ui->comboBaud->addItems({"9600", "19200", "38400", "57600", "115200"});
@@ -194,6 +199,16 @@ void MainWindow::on_btnClear_clicked() {
   ui->recvEdit->clear();
   m_rxLineOpen = false;
   rxIdleTimer->stop();
+}
+
+// 帮助 → 关于：显示版本号与 Qt 版本，方便用户反馈问题时说清楚用的是哪个版本。
+void MainWindow::on_actionAbout_triggered() {
+  QMessageBox::about(
+      this, tr("关于"),
+      tr("<b>串口助手</b> %1<br>"
+         "基于 Qt %2 构建<br><br>"
+         "跨平台串口调试工具：文本 / 十六进制收发、行尾符、彩色日志。")
+          .arg(QCoreApplication::applicationVersion(), QStringLiteral(QT_VERSION_STR)));
 }
 
 // 「HEX 发送」只切换发送框的显示形式：勾选时把内容显示成十六进制（如 41 42），

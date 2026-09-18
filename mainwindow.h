@@ -34,6 +34,7 @@ private slots:
   void on_btnRefresh_clicked(); // 手动刷新串口列表
   void on_checkHexSend_toggled(bool checked); // HEX 发送：切换发送框的显示形式
   void on_editSend_textChanged();             // 同步发送框内容到 m_sendData
+  void on_actionAbout_triggered();            // 帮助 → 关于（版本号 / Qt 版本）
 
   // 以下三个槽连接到 SerialController 的信号
   void onSerialData(const QByteArray &data);  // 收到数据

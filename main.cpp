@@ -2,6 +2,12 @@
 
 #include <QApplication>
 
+// 版本号由 CMakeLists 的 project(... VERSION) 注入（APP_VERSION）。
+// 这里给个兜底值，方便脱离 CMake 单独编译某个文件时也不至于报错。
+#ifndef APP_VERSION
+#define APP_VERSION "0.0.0-dev"
+#endif
+
 // 全局样式表（QSS，语法类似 CSS）：统一美化默认控件，
 // 让界面呈现扁平、现代的观感。深色区域专门用于接收区，便于阅读日志。
 static const char *kAppStyleSheet = R"(
@@ -38,6 +44,11 @@ QCheckBox                     { color: #333333; spacing: 6px; }
 
 int main(int argc, char *argv[]) {
   QApplication app(argc, argv); // 每个 Qt GUI 程序有且只有一个 QApplication
+
+  // 程序名与版本号：版本号全局只在这里的 APP_VERSION（源头是 CMakeLists）定义一次
+  QCoreApplication::setApplicationName(QStringLiteral("Serial-Assistant"));
+  QCoreApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
+
   app.setStyleSheet(kAppStyleSheet);
 
   MainWindow window; // 创建主窗口
