@@ -1,0 +1,138 @@
+name: release
+
+# CD：打 tag（如 v1.0.0）时，在两个平台上各出一份「免安装直接运行版」并挂到 Release。
+#   Windows → zip（exe + 全部 Qt DLL / 插件，解压双击即用）
+#   Linux   → AppImage（单文件）+ 便携 tar.gz（零依赖，解压即用，不需要 root）
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------- Windows
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # 允许创建 Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Qt（含 QtSerialPort）
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.0'
+          modules: 'qtserialport'
+          cache: true
+
+      - name: 配置
+        run: cmake -B build -S . -A x64
+
+      - name: 编译
+        run: cmake --build build --config Release --parallel
+
+      # 关键一步：CMakeLists 里的 qt_generate_deploy_app_script 会在 install 阶段
+      # 自动调用 windeployqt，把 Qt6Core.dll、platforms/qwindows.dll 等依赖收进 dist/。
+      # 注意 --prefix 必须是绝对路径（相对路径会让 Qt 的部署脚本报 qt.conf 错误）。
+      - name: 收集运行库（windeployqt）
+        run: cmake --install build --config Release --prefix "$env:GITHUB_WORKSPACE\dist"
+
+      - name: 打 zip
+        run: Compress-Archive -Path dist/* -DestinationPath "Serial-Assistant-$env:GITHUB_REF_NAME-win64.zip"
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Serial-Assistant-*-win64.zip
+
+  # ------------------------------------------------------------------ Linux
+  linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Qt（含 QtSerialPort）
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.0'
+          modules: 'qtserialport'
+          cache: true
+
+      - name: 安装构建/打包依赖
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev imagemagick
+
+      - name: 配置与编译
+        run: |
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
+
+      # 便携版：exe + 它真正依赖的 Qt 库 + xcb 平台插件，解压即用、不需要 root。
+      # （qt_generate_deploy_app_script 只支持 Windows/macOS，Linux 上得自己收）
+      # CMakeLists 里设了 INSTALL_RPATH=$ORIGIN/../lib，所以装出来的可执行文件
+      # 会自己从同级的 lib/ 找 Qt 库，不用设 LD_LIBRARY_PATH。
+      - name: 打包便携版 tar.gz
+        run: |
+          set -euo pipefail
+          PKG="Serial-Assistant-$GITHUB_REF_NAME-linux-x86_64"
+          PLUGINS="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || qmake -query QT_INSTALL_PLUGINS)"
+
+          cmake --install build --prefix "$PWD/$PKG"     # -> $PKG/bin/Serial-Assistant（必须是绝对路径）
+          mkdir -p "$PKG/lib" "$PKG/plugins/platforms"
+          cp -L "$PLUGINS/platforms/libqxcb.so" "$PKG/plugins/platforms/"
+
+          # 只带 Qt / ICU 这些「Qt 自己的」库；libX11、libc 等系统基础库由目标机提供
+          { ldd "$PKG/bin/Serial-Assistant"; ldd "$PLUGINS/platforms/libqxcb.so"; } \
+            | awk '/=> \// { print $3 }' | sort -u \
+            | while read -r lib; do
+                case "$(basename "$lib")" in
+                  libQt6*|libicu*) cp -L "$lib" "$PKG/lib/" ;;
+                esac
+              done
+
+          printf '[Paths]\nPrefix = .\nPlugins = plugins\n' > "$PKG/qt.conf"
+
+          # 兜底启动脚本：万一某发行版不认 RPATH，用这个也能跑
+          printf '#!/bin/sh\nDIR=$(cd "$(dirname "$0")" && pwd)\nexport LD_LIBRARY_PATH="$DIR/lib:$LD_LIBRARY_PATH"\nexec "$DIR/bin/Serial-Assistant" "$@"\n' > "$PKG/run.sh"
+          chmod +x "$PKG/run.sh"
+          tar czf "$PKG.tar.gz" "$PKG"
+
+      - name: 打包 AppImage
+        run: |
+          set -euo pipefail
+          # 项目图标（临时生成一个纯色圆角方块的 PNG，linuxdeploy 必须有图标）
+          convert -size 256x256 xc:'#2d8cf0' -fill white \
+                  -draw 'roundrectangle 56,56 200,200 28,28' serial-assistant.png
+
+          cat > serial-assistant.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Serial Assistant
+          Comment=跨平台串口调试工具
+          Exec=Serial-Assistant
+          Icon=serial-assistant
+          Categories=Development;Utility;
+          Terminal=false
+          EOF
+          sed -i 's/^ *//' serial-assistant.desktop
+
+          # 装进 AppDir（AppImage 的目录结构）
+          DESTDIR=AppDir cmake --install build --prefix /usr
+
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+          # APPIMAGE_EXTRACT_AND_RUN=1：runner 上没有 libfuse2，直接解包运行
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
+              --desktop-file serial-assistant.desktop --icon-file serial-assistant.png \
+              --output appimage
+          mv Serial_Assistant*.AppImage "Serial-Assistant-$GITHUB_REF_NAME-x86_64.AppImage"
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Serial-Assistant-*-x86_64.AppImage
+            Serial-Assistant-*-linux-x86_64.tar.gz

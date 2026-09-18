@@ -3,6 +3,7 @@
 #include "ui_mainwindow.h"
 
 #include <QDateTime>
+#include <QEvent>
 #include <QKeySequence>
 #include <QScrollBar>
 #include <QShortcut>
@@ -15,9 +16,6 @@ const char *kColorRx = "#2ecc71";    // 接收：绿色
 const char *kColorTx = "#3498db";    // 发送：蓝色
 const char *kColorInfo = "#95a5a6";  // 提示：灰色
 const char *kColorError = "#e74c3c"; // 错误：红色
-
-// 串口自动扫描间隔（毫秒），用于实现热插拔刷新
-const int kPortScanIntervalMs = 2000;
 
 // 把接收到的文本转成可插入接收区的 HTML：
 // 先统一换行符，再去掉末尾换行（避免末尾多出一行空白），最后把换行转成 <br>。
@@ -77,7 +75,7 @@ QString bytesToHexText(const QByteArray &bytes) {
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow),
-      serial(new SerialController(this)), portScanTimer(new QTimer(this)) {
+      serial(new SerialController(this)) {
   ui->setupUi(this);
 
   // 1) 波特率：给出常用预设，并允许自定义输入。
@@ -97,10 +95,9 @@ MainWindow::MainWindow(QWidget *parent)
   // 4) 首次枚举串口。
   refreshPorts();
 
-  // 5) 定时扫描实现热插拔：插上/拔掉 USB 串口后列表会自动更新。
-  portScanTimer->setInterval(kPortScanIntervalMs);
-  connect(portScanTimer, &QTimer::timeout, this, &MainWindow::refreshPorts);
-  portScanTimer->start();
+  // 5) 串口列表按需刷新：给下拉框装事件过滤器，用户点开它的那一刻才扫一遍 /dev。
+  //    不用定时器，没有后台开销；插上/拔掉 USB 串口后重新点开就能看到（热插拔）。
+  ui->comboPort->installEventFilter(this);
 
   // 6) 把串口控制器的信号接到本窗口的槽。
   connect(serial, &SerialController::dataReceived, this, &MainWindow::onSerialData);
@@ -127,12 +124,9 @@ MainWindow::~MainWindow() {
   delete ui;
 }
 
-// 重新枚举可用串口并同步到下拉框。
+// 枚举可用串口并同步到下拉框。
+// 按需调用：用户点开下拉框时（见 eventFilter）、点「刷新」按钮时、点「打开串口」前。
 void MainWindow::refreshPorts() {
-  // 串口已打开时不改动列表，避免干扰当前选择。
-  if (serial->isOpen())
-    return;
-
   const QStringList ports = SerialController::availablePorts();
 
   // 列表内容未变化就直接返回，避免下拉框反复重建导致闪烁。
@@ -150,6 +144,14 @@ void MainWindow::refreshPorts() {
     ui->comboPort->setCurrentText(selected);
 }
 
+// 事件过滤器：用户按下鼠标准备展开串口下拉框时，先刷新一遍串口列表。
+//（Qt 没有「串口热插拔」信号，所以用这种「用到时才扫」的触发式做法。）
+bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
+  if (obj == ui->comboPort && event->type() == QEvent::MouseButtonPress)
+    refreshPorts();
+  return QMainWindow::eventFilter(obj, event); // 其它事件照常交给基类处理
+}
+
 void MainWindow::on_btnRefresh_clicked() { refreshPorts(); }
 
 void MainWindow::on_btnOpen_clicked() {
@@ -160,6 +162,8 @@ void MainWindow::on_btnOpen_clicked() {
   }
 
   // 未打开 -> 校验输入并尝试打开。
+  refreshPorts(); // 打开前再刷一次列表，保证刚插上的串口也在
+
   const QString port = ui->comboPort->currentText().trimmed();
   if (port.isEmpty()) {
     appendNotice("请先选择一个串口", kColorError);

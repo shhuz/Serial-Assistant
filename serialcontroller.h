@@ -19,8 +19,9 @@ class SerialController : public QObject {
 public:
   explicit SerialController(QObject *parent = nullptr);
 
-  /// 扫描 /dev 列出真实串口设备的短名（如 "ttyACM0"），已排序。
-  /// 仅匹配 ttyS* / ttyUSB* / ttyACM*，不会列出 tty、pts 等非串口设备。
+  /// 枚举可用串口，返回设备名（Linux "ttyUSB0" / Windows "COM3" / macOS "cu.usbserial-*"），已排序去重。
+  /// 主力是跨平台的 QSerialPortInfo；Linux 上再合并 /dev 目录扫描兜底
+  /// （socat 等虚拟串口不在 /sys 设备树里，QSerialPortInfo 看不到）。
   static QStringList availablePorts();
 
   /// 打开串口。portName 可传短名或完整路径；baudRate 为波特率。

@@ -4,7 +4,8 @@
 #include <QByteArray>
 #include <QMainWindow>
 
-class QTimer;          // 前向声明，减少头文件依赖
+class QEvent;          // 前向声明，减少头文件依赖
+class QTimer;
 class SerialController;
 
 QT_BEGIN_NAMESPACE
@@ -39,16 +40,19 @@ private slots:
   void onSerialError(const QString &message); // 串口错误
   void onConnectionChanged(bool open);        // 连接状态变化
 
+protected:
+  // 事件过滤器：用户点开串口下拉框的那一刻刷新串口列表（触发式刷新，不用定时器）。
+  bool eventFilter(QObject *obj, QEvent *event) override;
+
 private:
   Ui::MainWindow *ui;         // 由 .ui 文件生成界面对象
   SerialController *serial;   // 串口控制器
-  QTimer *portScanTimer;      // 定时扫描串口（热插拔）
   QTimer *rxIdleTimer;        // 接收空闲计时：超时后自动换行
   bool m_rxLineOpen = false;  // 接收行是否仍处于「同一行」的连续状态
   QByteArray m_sendData;      // 实际要发送的字节（发送框的逻辑内容）
   bool m_updatingSend = false; // 防止显示切换与内容同步相互触发
 
-  void refreshPorts(); // 重新枚举可用串口并更新下拉框
+  void refreshPorts(); // 枚举可用串口并同步下拉框（按需调用：点开下拉框 / 点刷新 / 打开串口前）
   bool isAtBottom() const;
   void scrollToBottom();
   QString formatForDisplay(const QByteArray &data) const; // 按 HEX/文本格式化

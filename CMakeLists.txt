@@ -35,10 +35,21 @@ install(TARGETS Serial-Assistant
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-# 生成发布部署脚本（主要在 Windows/macOS 上使用）。
-qt_generate_deploy_app_script(
-    TARGET Serial-Assistant
-    OUTPUT_SCRIPT deploy_script
-    NO_UNSUPPORTED_PLATFORM_ERROR
-)
-install(SCRIPT ${deploy_script})
+# Linux 免安装包：把「查找 Qt 库」的路径写进可执行文件（$ORIGIN = 可执行文件所在目录），
+# 这样拷到任何机器上、双击就能跑，不需要设置 LD_LIBRARY_PATH，也不需要目标机装 Qt。
+if(UNIX AND NOT APPLE)
+    set_target_properties(Serial-Assistant PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib")
+endif()
+
+# 生成发布部署脚本：Windows 上会调用 windeployqt 收齐 DLL 和插件，macOS 上是 macdeployqt。
+# 只在 Windows / macOS 启用：Linux 上该脚本尚不完善（会去改 Qt 自带插件的 RPATH 而报错），
+# Linux 的免安装包由 CI 自己收集 Qt 库（见 .github/workflows/release.yml）。
+if(WIN32 OR APPLE)
+    qt_generate_deploy_app_script(
+        TARGET Serial-Assistant
+        OUTPUT_SCRIPT deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT ${deploy_script})
+endif()

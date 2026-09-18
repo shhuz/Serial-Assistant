@@ -1,6 +1,8 @@
 #include "serialcontroller.h"
 
 #include <QDir>
+#include <QFile>
+#include <QSerialPortInfo>
 
 // 构造函数：把底层串口的两个关键信号接到本类的私有槽上。
 // 这样外部只需要监听我们对外暴露的三个信号即可。
@@ -11,15 +13,31 @@ SerialController::SerialController(QObject *parent) : QObject(parent) {
           &SerialController::handleError);
 }
 
-// 静态方法：扫描 /dev 目录，只列出真实的串口设备。
-// 只匹配 ttyS*(板载串口) / ttyUSB*(USB转串口) / ttyACM*(CDC/ACM)，避免把
-// tty、pts 等非串口设备也列出来。返回的是短名，如 "ttyACM0"。
+// 静态方法：枚举可用串口，返回设备名（Linux "ttyUSB0" / Windows "COM3" / macOS "cu.usbserial-*"）。
 QStringList SerialController::availablePorts() {
-  QDir devDir("/dev");
-  QStringList filters;
-  filters << "ttyS*" << "ttyUSB*" << "ttyACM*";
-  QStringList names =
-      devDir.entryList(filters, QDir::System | QDir::Files | QDir::Readable);
+  QStringList names;
+
+  // 1) 主力：Qt 官方的跨平台枚举，只列内核认得的真串口，
+  //    还能顺带拿到描述、VID/PID（info.description() 等，界面里可用来显示厂商）。
+  for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts()) {
+#ifndef Q_OS_WIN
+    // Linux 的 /sys 设备树里可能登记着没有实际设备节点的端口（如容器里的 ttyS0~ttyS31），
+    // 列出来也打不开。按「设备节点是否真实存在」过滤掉。
+    if (!QFile::exists(info.systemLocation()))
+      continue;
+#endif
+    names << info.portName();
+  }
+
+#ifdef Q_OS_LINUX
+  // 2) 兜底（仅 Linux）：socat 之类造的虚拟串口只是 /dev 下的软链接，不在 /sys 里，
+  //    QSerialPortInfo 看不到，但从目录能扫到 —— 调试与自测都靠它。
+  const QDir devDir(QStringLiteral("/dev"));
+  const QStringList filters{"ttyS*", "ttyUSB*", "ttyACM*"};
+  names << devDir.entryList(filters, QDir::System | QDir::Files | QDir::Readable);
+#endif
+
+  names.removeDuplicates();
   names.sort();
   return names;
 }
@@ -29,11 +47,14 @@ bool SerialController::open(const QString &portName, int baudRate) {
   if (m_serial.isOpen())
     m_serial.close();
 
-  // Linux 下允许用户只填 "ttyACM0"，这里补全为 "/dev/ttyACM0"。
-  // Windows 下端口名形如 "COM3"，本身以字母开头，不会被误加前缀。
+  // Unix 上把短名补成完整路径：Linux "ttyUSB0" -> "/dev/ttyUSB0"，
+  // macOS "cu.usbserial-XXXX" -> "/dev/cu.usbserial-XXXX"；已经带路径的保持原样。
+  // Windows 的 "COM3" 本身就是完整名字，不能加前缀。
   QString name = portName.trimmed();
-  if (!name.isEmpty() && !name.startsWith('/') && name.startsWith("tty"))
-    name.prepend("/dev/");
+#ifndef Q_OS_WIN
+  if (!name.isEmpty() && !name.startsWith(QLatin1Char('/')))
+    name.prepend(QStringLiteral("/dev/"));
+#endif
 
   // 串口参数：8 位数据位、无校验、1 位停止位、无流控（即常说的 8N1）。
   m_serial.setPortName(name);
