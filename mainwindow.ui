@@ -6,113 +6,204 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>714</width>
-    <height>486</height>
+    <width>780</width>
+    <height>580</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>串口助手</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QComboBox" name="comboPort">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>20</y>
-      <width>81</width>
-      <height>26</height>
-     </rect>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="btnOpen">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>140</y>
-      <width>81</width>
-      <height>26</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>打开/关闭串口</string>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="btnSend">
-    <property name="geometry">
-     <rect>
-      <x>470</x>
-      <y>385</y>
-      <width>81</width>
-      <height>41</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>发送</string>
-    </property>
-   </widget>
-   <widget class="QComboBox" name="comboBaud">
-    <property name="geometry">
-     <rect>
-      <x>10</x>
-      <y>80</y>
-      <width>81</width>
-      <height>26</height>
-     </rect>
-    </property>
-   </widget>
-   <widget class="QLineEdit" name="editSend">
-    <property name="geometry">
-     <rect>
-      <x>120</x>
-      <y>380</y>
-      <width>341</width>
-      <height>51</height>
-     </rect>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="recvEdit">
-    <property name="geometry">
-     <rect>
-      <x>120</x>
-      <y>20</y>
-      <width>501</width>
-      <height>321</height>
-     </rect>
-    </property>
-   </widget>
-   <widget class="QPushButton" name="btnClear">
-    <property name="geometry">
-     <rect>
-      <x>630</x>
-      <y>120</y>
-      <width>81</width>
-      <height>41</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>清空接收</string>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="checkHex">
-    <property name="geometry">
-     <rect>
-      <x>640</x>
-      <y>50</y>
-      <width>71</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>HEX显示</string>
-    </property>
-   </widget>
+   <layout class="QVBoxLayout" name="mainLayout">
+    <item>
+     <layout class="QHBoxLayout" name="topLayout">
+      <item>
+       <widget class="QLabel" name="labelPort">
+        <property name="text">
+         <string>串口:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="comboPort">
+        <property name="minimumSize">
+         <size>
+          <width>120</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="labelBaud">
+        <property name="text">
+         <string>波特率:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="comboBaud">
+        <property name="minimumSize">
+         <size>
+          <width>100</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="topSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnRefresh">
+        <property name="text">
+         <string>刷新</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnOpen">
+        <property name="text">
+         <string>打开串口</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <widget class="QPlainTextEdit" name="recvEdit">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="sendLayout">
+      <item>
+       <widget class="QPlainTextEdit" name="editSend">
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>70</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QVBoxLayout" name="sendButtonLayout">
+        <item>
+         <widget class="QPushButton" name="btnSend">
+          <property name="text">
+           <string>发送</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btnClear">
+          <property name="text">
+           <string>清空接收</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="optionLayout">
+      <item>
+       <widget class="QCheckBox" name="checkHexDisplay">
+        <property name="text">
+         <string>HEX 显示</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="checkHexSend">
+        <property name="text">
+         <string>HEX 发送</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="labelLineEnd">
+        <property name="text">
+         <string>行尾:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="comboLineEnd">
+        <property name="minimumSize">
+         <size>
+          <width>80</width>
+          <height>0</height>
+         </size>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="labelRxTimeout">
+        <property name="text">
+         <string>空闲换行:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="spinRxTimeout">
+        <property name="minimumSize">
+         <size>
+          <width>90</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="toolTip">
+         <string>同一行允许的最大空闲时间，超过则自动换行；0 表示不自动换行</string>
+        </property>
+        <property name="suffix">
+         <string> ms</string>
+        </property>
+        <property name="maximum">
+         <number>9999</number>
+        </property>
+        <property name="value">
+         <number>100</number>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="optionSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </item>
+   </layout>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>714</width>
+     <width>780</width>
      <height>23</height>
     </rect>
    </property>

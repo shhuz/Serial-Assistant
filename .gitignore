@@ -1,27 +1,6 @@
 # 构建产物
 build/
-build-*/
-out/
 
-# CMake / Qt 生成物
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-*_autogen/
-compile_commands.json
-Makefile
-*.pro.user
 
-# 编译中间产物
-*.o
-*.obj
-*.moc
-moc_*.cpp
-qrc_*.cpp
-ui_*.h
-
-# 编辑器 / 系统
-.vscode/
-.idea/
-*.swp
-.DS_Store
+# Qt Creator 会话/缓存（IDE 自动生成）
+.qtcreator/
