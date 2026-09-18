@@ -26,14 +26,23 @@ QStringList SerialController::availablePorts() {
     if (!QFile::exists(info.systemLocation()))
       continue;
 #endif
+    // 内核的 8250 驱动会注册 32 个 legacy 串口（ttyS0~ttyS31），主板上往往根本没有对应硬件，
+    // 它们也没有 USB 属性。这类"占位端口"一律不显示——真要用板载串口时手动输入 ttyS0 即可。
+    // 判据和 Arduino 生态一致：真正的 USB 串口在 sysfs 里属于 usb / usb-serial 子系统，
+    // 在 Qt 这边就体现为有 VID/PID（hasVendorIdentifier）。
+    if (info.portName().startsWith(QStringLiteral("ttyS")) &&
+        !info.hasVendorIdentifier())
+      continue;
+
     names << info.portName();
   }
 
 #ifdef Q_OS_LINUX
   // 2) 兜底（仅 Linux）：socat 之类造的虚拟串口只是 /dev 下的软链接，不在 /sys 里，
   //    QSerialPortInfo 看不到，但从目录能扫到 —— 调试与自测都靠它。
+  //    这里刻意不含 ttyS*：那是上一步已经排除掉的 8250 占位端口。
   const QDir devDir(QStringLiteral("/dev"));
-  const QStringList filters{"ttyS*", "ttyUSB*", "ttyACM*"};
+  const QStringList filters{"ttyUSB*", "ttyACM*"};
   names << devDir.entryList(filters, QDir::System | QDir::Files | QDir::Readable);
 #endif
 
